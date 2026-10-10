@@ -634,13 +634,151 @@ a:focus-visible {
 .journey-sign .sign-face { width: 100%; }
 .journey-note { top: 8%; right: 3%; transform: rotate(-7deg); }
 
+.train-stage {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  left: 50%;
+  width: max(100%, calc(100vh * 1.8253));
+  aspect-ratio: 1694 / 928;
+  transform: translate(-50%, -50%);
+  container-type: inline-size;
+  pointer-events: none;
+}
+
+.train-stage-plate {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+/* the sprite box sits exactly where the painted train sat in the artwork */
+.train-layer {
+  position: absolute;
+  top: 25.71%;
+  left: 2.4%;
+  width: 94.54%;
+  aspect-ratio: 2002 / 388;
+}
+
+.train-run {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+  will-change: transform;
+}
+
+.train-copy {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* second copy trails one train length (+ gap) behind, giving the seamless wrap-around */
+.train-copy--b { left: 110%; }
+
+.train-sprite {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* the wheels are cut out of the artwork and spun on top of it (see WHEELS in App.tsx) */
+.train-wheel {
+  position: absolute;
+  background: url(/images/train-wheels.webp) no-repeat;
+  background-size: 1200% 100%;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.train-rod {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* soft steam puffs from the chimney, carried along with the train */
+.train-puff {
+  position: absolute;
+  top: -3%;
+  left: 6.3%;
+  width: 4%;
+  aspect-ratio: 1;
+  border-radius: 56% 44% 52% 48% / 50% 54% 46% 50%;
+  background: radial-gradient(circle at 42% 40%, rgba(255, 252, 247, .96), rgba(240, 228, 222, .88) 58%, rgba(226, 210, 204, .5) 100%);
+  filter: blur(.6px);
+  opacity: 0;
+  pointer-events: none;
+  animation: train-puff 3.8s ease-out infinite;
+}
+.train-puff--2 { animation-delay: 1.27s; }
+.train-puff--3 { animation-delay: 2.53s; }
+
+@keyframes train-puff {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.35); }
+  12% { opacity: .9; }
+  100% { opacity: 0; transform: translate3d(260%, -330%, 0) scale(1.7); }
+}
+
+.train-stage .train-card {
+  position: absolute;
+  z-index: 1;
+  height: auto;
+  padding: 0 .9cqw;
+  pointer-events: auto;
+}
+
+.train-stage .train-card h2 { font-size: max(8px, 1.1cqw); }
+.train-stage .train-card .journey-date { font-size: max(6.5px, .8cqw); }
+.train-stage .train-card .journey-description { font-size: max(6.5px, .8cqw); }
+.train-stage .train-card .journey-tags { gap: .25cqw; margin-top: .15cqw; }
+.train-stage .train-card .journey-tags span { padding: .08cqw .45cqw; font-size: max(5.5px, .56cqw); }
+
+/* a loose sheet of paper that lifts off the carriage when the cursor reaches it */
+.train-stage .train-card::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border: 1.5px solid rgba(112, 70, 37, .42);
+  border-radius: 3px 5px 3px 6px;
+  background: linear-gradient(180deg, #fdecc8, #f7deb2);
+  box-shadow: 0 .2cqw .2cqw rgba(60, 35, 15, 0), 0 0 0 rgba(60, 35, 15, 0);
+  opacity: 0;
+  transition: opacity .22s ease, box-shadow .22s ease;
+}
+
+.train-stage .train-card.is-hovered::before,
+.train-stage .train-card:focus-visible::before {
+  opacity: 1;
+  box-shadow: 0 .55cqw 1cqw rgba(60, 35, 15, .38), 0 .1cqw .2cqw rgba(60, 35, 15, .35);
+}
+
+.train-stage .train-card.is-hovered { transform: translateY(-.35cqw) scale(1.05) rotate(-.7deg); filter: none; }
+.train-stage .train-card:focus-visible { outline: none; }
+
 .journey-line {
+  display: none;
   position: absolute;
   top: 41%;
   height: 13.5%;
   right: 3.3%;
   left: 29%;
-  display: grid;
+  z-index: 1;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   column-gap: 5.5%;
   align-items: stretch;
@@ -656,7 +794,28 @@ a:focus-visible {
   justify-content: center;
   overflow: hidden;
   padding: 2px 8%;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
   text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .22s ease, filter .22s ease, visibility 0s;
+}
+
+.journey-car.is-hovered {
+  z-index: 2;
+  filter: brightness(1.07);
+  transform: translateY(-3px) scale(1.045);
+}
+
+.journey-car.is-source-hidden { visibility: hidden; }
+
+.journey-car:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid #ffb84d;
+  outline-offset: 2px;
 }
 
 .journey-car::after,
@@ -718,6 +877,76 @@ a:focus-visible {
   line-height: 1.3;
 }
 
+/* Experience card expansion (shared-element / FLIP) */
+.experience-scrim {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(43, 27, 14, 0);
+  opacity: 0;
+  transition: opacity .5s ease, background .5s ease;
+}
+
+.experience-scrim.is-visible {
+  background: rgba(43, 27, 14, .4);
+  opacity: 1;
+  backdrop-filter: blur(2.5px);
+}
+
+.experience-flip {
+  position: relative;
+  display: grid;
+  width: min(480px, 100%);
+  max-height: 86vh;
+  padding: 34px 36px 30px;
+  overflow: hidden auto;
+  border: 3px solid #704625;
+  border-radius: 17px 14px 18px 15px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 27px, rgba(143, 97, 52, .08) 27px 28px),
+    #fff1d4;
+  box-shadow: 0 16px 40px rgba(29, 18, 10, .3), inset 0 0 0 3px rgba(255, 255, 255, .65);
+  text-align: center;
+  transform-origin: center center;
+  transition: transform .62s cubic-bezier(.32, .84, .24, 1);
+  will-change: transform;
+}
+
+.experience-flip-close { position: absolute; top: 10px; right: 10px; z-index: 2; }
+
+.flip-mini,
+.flip-detail {
+  grid-area: 1 / 1;
+  align-self: center;
+  justify-self: stretch;
+  opacity: 0;
+  transition: opacity .3s ease .1s;
+}
+
+.experience-flip[data-stage="mini"] .flip-mini { opacity: 1; transition: none; }
+.experience-flip[data-stage="collapsing"] .flip-mini { opacity: 1; }
+.experience-flip[data-stage="expanding"] .flip-detail,
+.experience-flip[data-stage="expanded"] .flip-detail { opacity: 1; }
+
+.flip-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 6%;
+}
+
+.flip-mini h2 { margin: 0; font-size: 15px; line-height: 1.05; }
+.flip-mini .journey-date { margin: 2px 0; font-size: 11px; }
+.flip-mini .journey-description { display: -webkit-box; overflow: hidden; margin: 0 auto; font-size: 11px; line-height: 1.12; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+.flip-detail h2 { margin: 3px 0; font-size: 34px; line-height: 1; }
+.flip-detail .dialog-icon .experience-detail-icon { width: 34px; height: 34px; }
+.flip-detail .experience-flip-tags { justify-content: center; margin-top: 4px; }
+.flip-detail .experience-flip-tags span { padding: 3px 10px; font-size: 12px; }
+
 .horizon-sign {
   position: absolute;
   bottom: 6%;
@@ -750,90 +979,135 @@ a:focus-visible {
 .skills-sign .sign-face { width: 100%; }
 .skills-note { top: 8%; right: 3.5%; }
 
-.skill-garden { position: absolute; inset: 0; }
+/* Desktop: TreeStage carries the skills. This list is the small-screen fallback (see max-width: 860px). */
+.skill-garden { display: none; }
 
 .skill-fruit {
-  position: absolute;
-  display: flex;
-  width: clamp(52px, 4.6vw, 72px);
-  height: clamp(56px, 4.9vw, 76px);
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 2px;
-  padding: 9px 5px 6px;
-  border: 1.5px solid rgba(82, 49, 26, .82);
-  border-radius: 47% 51% 49% 51% / 40% 40% 60% 60%;
-  box-shadow: inset 0 4px 0 rgba(255, 255, 255, .28), inset -4px -4px 0 rgba(74, 46, 25, .1), 0 4px 7px rgba(55, 37, 22, .24);
+  position: relative;
+  display: block;
+  width: min(120px, 38vw);
+  padding: 0;
+  border: 0;
+  background: none;
   color: #2e2117;
   cursor: pointer;
-  transition: transform .2s ease, filter .2s ease, box-shadow .2s ease;
+  filter: drop-shadow(0 3px 3px rgba(55, 37, 22, .28));
+  transition: transform .2s ease, filter .2s ease;
 }
 
-.skill-fruit::before {
-  position: absolute;
-  top: -15px;
-  left: 49%;
-  width: 3px;
-  height: 16px;
-  border: 1px solid #5d421f;
-  border-radius: 5px 2px 2px 2px;
-  background: #78502b;
-  content: "";
-  transform: rotate(-4deg);
-}
+.skill-fruit__img { display: block; width: 100%; height: auto; pointer-events: none; user-select: none; }
 
-.skill-fruit::after {
+/* A skill's name is never painted on the apple; it is revealed through the details note. */
+.skill-fruit__name {
   position: absolute;
-  top: -7px;
-  left: 52%;
-  width: 11px;
-  height: 6px;
-  border: 1px solid rgba(62, 82, 34, .65);
-  border-radius: 100% 0 100% 0;
-  background: #719246;
-  content: "";
-  transform: rotate(23deg);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .skill-fruit:hover,
+.skill-fruit:focus-visible,
 .skill-fruit.is-selected {
-  z-index: 4;
-  filter: brightness(1.06);
-  box-shadow: inset 0 4px 0 rgba(255, 255, 255, .3), inset -4px -4px 0 rgba(74, 46, 25, .1), 0 7px 10px rgba(55, 37, 22, .28);
-  transform: translateX(-50%) translateY(-4px) rotate(0deg) scale(1.06);
+  filter: drop-shadow(0 6px 5px rgba(55, 37, 22, .32)) brightness(1.06);
+  transform: scale(1.06);
 }
 
-.skill-fruit--coral { background: linear-gradient(140deg, #ff9a83, #ed5e59 72%); }
-.skill-fruit--green { background: linear-gradient(140deg, #d1e382, #a6bd58 74%); }
-.skill-fruit--gold { background: linear-gradient(140deg, #ffe292, #ffb44d 75%); }
-.skill-fruit--violet { background: linear-gradient(140deg, #e5a9e2, #c87cce 78%); }
-.skill-fruit--blue { background: linear-gradient(140deg, #b8d8eb, #82b1db 78%); }
-.skill-fruit--rose { background: linear-gradient(140deg, #ffb2a5, #f47472 78%); }
+.skill-fruit:focus-visible { outline: 2px solid #fff3c4; outline-offset: 3px; border-radius: 50%; }
 
-.skill-icon { width: 15px; height: 15px; flex: 0 0 15px; }
-.skill-fruit span { max-width: 54px; font-size: 7.5px; line-height: 1.05; text-align: center; }
+/* ---- Animated tree (TreeStage) ----
+   A 1376x768 stage, scaled in TreeStage.tsx to cover the page exactly like the background image. */
+.tree-stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1376px;
+  height: 768px;
+  transform: translate(-50%, -50%);
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
 
-.skill-fruit--front { top: 15%; left: 20%; transform: translateX(-50%) rotate(-4deg); }
-.skill-fruit--backend { top: 13%; left: 44%; transform: translateX(-50%) rotate(2deg); }
-.skill-fruit--ai { top: 16%; left: 69%; transform: translateX(-50%) rotate(4deg); }
-.skill-fruit--tools { top: 30%; left: 28%; transform: translateX(-50%) rotate(-4deg); }
-.skill-fruit--code { top: 31%; left: 50%; transform: translateX(-50%) rotate(2deg); }
-.skill-fruit--data { top: 30%; left: 71%; transform: translateX(-50%) rotate(-2deg); }
-.skill-fruit--cloud { top: 44%; left: 50%; transform: translateX(-50%) rotate(2deg); }
+.tree-layer { position: absolute; pointer-events: none; }
+
+/* At rest the painted background shows through, so the cut-out layers stay hidden and nothing can look doubled. */
+.tree-layer__img { display: block; width: 100%; height: 100%; opacity: 0; user-select: none; }
+.tree-stage.is-live .tree-layer { will-change: transform; }
+.tree-stage.is-live .tree-layer__img { opacity: 1; }
+
+.tree-decor { position: absolute; pointer-events: none; user-select: none; }
+
+.tree-trunk-hit {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.tree-trunk-hit:focus-visible { outline: none; background: rgba(255, 243, 196, .2); }
+.tree-stage.is-busy .tree-trunk-hit { cursor: default; }
+
+.tree-skill-apple {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  pointer-events: none;
+}
+
+.tree-skill-apple:not(:disabled) { cursor: pointer; pointer-events: auto; }
+.tree-stage.is-live .tree-skill-apple { will-change: transform; }
+
+.tree-skill-apple__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  transform-origin: 50% 70%;
+  transition: transform .2s ease, filter .2s ease;
+  user-select: none;
+}
+
+.tree-skill-apple:not(:disabled) .tree-skill-apple__img { filter: drop-shadow(0 3px 3px rgba(55, 37, 22, .3)); }
+
+.tree-skill-apple:not(:disabled):hover .tree-skill-apple__img,
+.tree-skill-apple:not(:disabled):focus-visible .tree-skill-apple__img,
+.tree-skill-apple.is-selected .tree-skill-apple__img {
+  filter: drop-shadow(0 6px 5px rgba(55, 37, 22, .34)) brightness(1.07);
+  transform: translateY(-5px) scale(1.12);
+}
+
+.tree-skill-apple:focus-visible { outline: 2px solid #fff3c4; outline-offset: 4px; border-radius: 50%; }
+
+.tree-leaf {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  will-change: transform, opacity;
+}
 
 .skill-note {
   position: absolute;
   z-index: 5;
-  bottom: 6%;
-  left: 50%;
-  width: min(370px, 82%);
+  top: 25%;
+  right: 3.5%;
+  width: min(300px, 28%);
   padding: 13px 42px 13px 18px;
   border: 2px solid #8b6035;
   border-radius: 8px 14px 10px 12px;
   background: rgba(255, 245, 219, .97);
   box-shadow: 0 6px 18px rgba(53, 35, 19, .25);
-  transform: translateX(-50%);
 }
 
 .skill-note strong { display: block; font-size: 20px; }
@@ -1303,8 +1577,6 @@ a.contact-note:hover {
 
   .skills-sign { top: 3.5%; }
   .skills-note { top: 7%; }
-  .skill-fruit { width: 62px; height: 66px; }
-  .skill-fruit span { font-size: 8px; }
 
   .achievement-grid { right: 8%; left: 8%; }
   .scrap-panel { padding: 3% 3%; border-width: 2px; }
@@ -1328,6 +1600,7 @@ a.contact-note:hover {
   .scene-main { background-position: center center; }
   .scene-main--projects { background-position: left top; background-size: auto 900px; }
   .scene-main--experience { background-position: left top; background-size: auto 540px; }
+  .train-stage { display: none; }
   .scene-main--contact { background-position: right top; background-size: auto 1000px; }
   .home-copy { top: 13%; left: 3%; width: 76%; }
   .home-copy h1 > span { font-size: 37px; }
@@ -1395,7 +1668,7 @@ a.contact-note:hover {
   .experience-page { min-height: 1250px; padding-top: 1px; }
   .journey-sign { top: 30px; width: min(390px, 82%); }
   .journey-note { top: 151px; right: 14px; font-size: 15px; }
-  .journey-line { position: relative; top: auto; right: auto; left: auto; grid-template-columns: 1fr; gap: 18px; padding: 207px 17px 20px; }
+  .journey-line { display: grid; position: relative; top: auto; right: auto; left: auto; grid-template-columns: 1fr; gap: 18px; padding: 207px 17px 20px; }
   .journey-car { width: min(380px, 100%); min-height: auto; justify-self: center; padding: 17px 15px 16px; border: 3px solid #764421; border-radius: 12px; background: rgba(255, 239, 205, .95); box-shadow: 0 6px 0 rgba(62, 36, 19, .25), inset 0 0 0 2px rgba(255, 255, 255, .65); }
   .journey-car::after { display: block; }
   .journey-car h2 { font-size: 22px; }
@@ -1409,24 +1682,26 @@ a.contact-note:hover {
   .skills-sign .sign-face h1 { font-size: 36px; }
   .skills-note { top: 145px; right: 14px; font-size: 15px; }
   .skill-garden { position: relative; inset: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: center; gap: 18px 5px; padding: 200px 11px 65px; }
-  .skill-fruit,
-  .skill-fruit--front,
-  .skill-fruit--backend,
-  .skill-fruit--ai,
-  .skill-fruit--tools,
-  .skill-fruit--code,
-  .skill-fruit--data,
-  .skill-fruit--cloud {
-    position: relative;
-    top: auto;
-    left: auto;
-    width: min(137px, 43vw);
-    height: 140px;
-    transform: none;
-  }
+  .tree-stage { display: none; }
+  .scene-main--skills { background-image: url(/images/skills.jpg) !important; }
+  .skill-fruit:hover,
+  .skill-fruit:focus-visible,
+  .skill-fruit.is-selected { transform: scale(1.06); }
   .skill-fruit--cloud { grid-column: 1 / -1; }
-  .skill-fruit span { font-size: 16px; }
-  .skill-note { position: relative; bottom: auto; left: auto; width: calc(100% - 34px); margin: 0 auto 18px; transform: none; }
+  /* Listed instead of hung, so the names stay visible as captions. */
+  .skill-fruit__name {
+    position: static;
+    width: auto;
+    height: auto;
+    margin-top: 4px;
+    overflow: visible;
+    clip-path: none;
+    font-size: 16px;
+    line-height: 1.05;
+    text-align: center;
+    white-space: normal;
+  }
+  .skill-note { position: relative; top: auto; right: auto; bottom: auto; left: auto; width: calc(100% - 34px); margin: 0 auto 18px; transform: none; }
   .skills-books { right: 6%; bottom: 14px; width: 170px; opacity: .95; }
   .skills-books span { font-size: 15px; }
 

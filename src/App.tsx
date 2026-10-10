@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import TreeStage from "./TreeStage";
 
 type PageId = "home" | "about" | "projects" | "experience" | "skills" | "achievements" | "contact";
 type IconName = "home" | "about" | "projects" | "experience" | "skills" | "achievements" | "contact";
@@ -17,8 +18,8 @@ const sceneImages: Record<PageId, string> = {
   home: "/images/home.jpg",
   about: "/images/about.jpg",
   projects: "/images/projects.jpg",
-  experience: "/images/experience.jpg",
-  skills: "/images/skills.jpg",
+  experience: "/images/experience-plate.jpg",
+  skills: "/images/skills-tree.jpg",
   achievements: "/images/achievements.jpg",
   contact: "/images/contact.jpg",
 };
@@ -324,71 +325,323 @@ const experiences = [
   { company: "Unified Mentor", date: "Mar 2025 - Jun 2025", description: "Built a churn predictor and restaurant growth analysis using ML and data analysis.", tags: ["ML", "Data Analysis", "Python"] },
 ];
 
+function ExperienceDetailIcon({ index }: { index: number }) {
+  const icons: React.ReactNode[] = [
+    <><rect x="4" y="4" width="16" height="12" rx="1.2" /><path d="M2.5 20h19M9 16l-1 4M15 16l1 4" /></>,
+    <><path d="M12 5a3.2 3.2 0 0 0-5.8 1.8A3.6 3.6 0 0 0 4 13.5 3.3 3.3 0 0 0 7 19h5ZM12 5a3.2 3.2 0 0 1 5.8 1.8A3.6 3.6 0 0 1 20 13.5 3.3 3.3 0 0 1 17 19h-5ZM8 9h2m4 0h2m-8 5h2m4 0h2M12 5v14" /></>,
+    <><rect x="4" y="4" width="16" height="7" rx="1.5" /><rect x="4" y="14" width="16" height="6" rx="1.5" /><path d="M7 7.5h.1M7 17h.1M11 7.5h6M11 17h6" /></>,
+    <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.4" /><path d="M3.5 20v-1.3a5.5 5.5 0 0 1 11 0V20ZM15.2 15a4.4 4.4 0 0 1 5.3 4.3v.7h-4" /></>,
+  ];
+  return <svg className="experience-detail-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{icons[index % icons.length]}</svg>;
+}
+
+type FlipStage = "mini" | "expanding" | "expanded" | "collapsing";
+
+// Geometry of the painted train inside the 1376x768 scene artwork. The locomotive + four
+// carriages live in /images/train-sprite.webp; the empty landscape is /images/experience-plate.jpg.
+const TRAIN_SPRITE = { w: 2002, h: 388 };
+const TRAIN_GAP = 0.1; // empty track between one train copy and the next, as a fraction of train length
+const TRAIN_SPEED = 0.042; // train lengths per second at cruising speed
+// x-range (in sprite pixels) of the blank paper panel on each carriage, and their shared y-range
+const CAR_PANELS: ReadonlyArray<readonly [number, number]> = [[609, 860], [963, 1211], [1328, 1582], [1686, 1938]];
+const CAR_PANEL_Y = [117, 269] as const;
+// spinning wheels: [centre x, centre y, radius] in sprite pixels (artwork cut out into /images/train-wheels.webp)
+const WHEEL_TILE = 116;
+const WHEELS: ReadonlyArray<readonly [number, number, number]> = [[142,345.1,32.5],[218,346.5,30.5],[296,315.4,60.3],[444,314.9,60.1],[655,339.7,38.6],[812,339.7,38.8],[1004,339.8,38.7],[1167,339.7,38.7],[1371,339.8,38.5],[1530,339.8,38.6],[1743,339.7,38.7],[1900,339.6,38.7]];
+// connecting rods stay still on top of the spinning drivers: [x, y, w, h]
+const ROD_BOX = [242, 297, 196, 47] as const;
+
+const panelStyle = (index: number): React.CSSProperties => {
+  const [x0, x1] = CAR_PANELS[index];
+  return {
+    left: `${(x0 / TRAIN_SPRITE.w) * 100}%`,
+    width: `${((x1 - x0) / TRAIN_SPRITE.w) * 100}%`,
+    top: `${(CAR_PANEL_Y[0] / TRAIN_SPRITE.h) * 100}%`,
+    height: `${((CAR_PANEL_Y[1] - CAR_PANEL_Y[0]) / TRAIN_SPRITE.h) * 100}%`,
+  };
+};
+
 function ExperiencePage() {
+  const runRef = useRef<HTMLDivElement>(null);
+  const spriteRef = useRef<HTMLDivElement>(null);
+  const flipRef = useRef<HTMLDivElement>(null);
+  const sourceRef = useRef<HTMLButtonElement | null>(null);
+  const startRectRef = useRef<DOMRect | null>(null);
+
+  const wheelEls = useRef<HTMLElement[]>([]);
+  const speedRef = useRef(1);
+  const targetSpeedRef = useRef(1);
+  const offsetRef = useRef(0);
+
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [flip, setFlip] = useState<{ index: number; key: string; stage: FlipStage } | null>(null);
+
+  // The whole train (locomotive + four carriages + their paper cards) is ONE element,
+  // so the spacing between cars can never change. A second copy sits one train-length
+  // (plus a gap) behind it (the train drives right to left); sliding both by the same offset and wrapping at that period
+  // gives the endless exit-right / enter-left loop without any visible reset.
+  useEffect(() => {
+    targetSpeedRef.current = hoveredKey !== null || flip !== null ? 0 : 1;
+  }, [hoveredKey, flip]);
+
+  useEffect(() => {
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    wheelEls.current = Array.from(document.querySelectorAll<HTMLElement>(".train-wheel"));
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = Math.min(now - last, 50) / 1000;
+      last = now;
+      const run = runRef.current;
+      const sprite = spriteRef.current;
+      if (run && sprite) {
+        const length = sprite.offsetWidth;
+        const target = reduceMotion ? 0 : targetSpeedRef.current;
+        // brake fairly quickly, pull away slowly - like a heavy train
+        const tau = target === 0 ? 0.3 : 0.85;
+        speedRef.current += (target - speedRef.current) * (1 - Math.exp(-dt / tau));
+        if (target === 0 && speedRef.current < 0.002) speedRef.current = 0;
+        const period = length * (1 + TRAIN_GAP);
+        offsetRef.current = (offsetRef.current + length * TRAIN_SPEED * speedRef.current * dt) % period;
+        const scale = length / TRAIN_SPRITE.w;
+        const phase = (offsetRef.current / length) * 150;
+        const lively = Math.min(1, speedRef.current * 1.4);
+        const bob = (Math.sin(phase) * 0.9 + Math.sin(phase * 0.37 + 1) * 0.7) * scale * lively;
+        const tilt = Math.sin(phase * 0.8) * 0.05 * lively;
+        // wheels roll without slipping: angle = distance travelled / radius (train drives right to left)
+        const travelled = offsetRef.current / scale;
+        const wheels = wheelEls.current;
+        for (let i = 0; i < wheels.length; i += 1) {
+          const radius = Number(wheels[i].dataset.r) || 40;
+          wheels[i].style.transform = `rotate(${(-(travelled / radius) * 57.2958).toFixed(2)}deg)`;
+        }
+        run.style.transform = `translate3d(${(-offsetRef.current).toFixed(2)}px, ${bob.toFixed(2)}px, 0) rotate(${tilt.toFixed(3)}deg)`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const placeFlipAt = (box: HTMLDivElement, rect: DOMRect, withTransition: boolean) => {
+    const target = box.getBoundingClientRect();
+    const scaleX = rect.width / target.width;
+    const scaleY = rect.height / target.height;
+    const dx = rect.left + rect.width / 2 - (target.left + target.width / 2);
+    const dy = rect.top + rect.height / 2 - (target.top + target.height / 2);
+    box.style.transition = withTransition ? "" : "none";
+    box.style.transform = `translate3d(${dx.toFixed(2)}px, ${dy.toFixed(2)}px, 0) scale(${scaleX.toFixed(4)}, ${scaleY.toFixed(4)})`;
+  };
+
+  useLayoutEffect(() => {
+    if (!flip || flip.stage !== "mini" || !flipRef.current || !startRectRef.current) return;
+    const box = flipRef.current;
+    placeFlipAt(box, startRectRef.current, false);
+    void box.offsetWidth;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        box.style.transition = "";
+        box.style.transform = "translate3d(0,0,0) scale(1,1)";
+        setFlip((current) => (current && current.stage === "mini" ? { ...current, stage: "expanding" } : current));
+      });
+    });
+  }, [flip]);
+
+  const openCard = (index: number, key: string, el: HTMLButtonElement) => {
+    if (flip) return;
+    // the train stops dead the moment a card is picked up, so the paper lifts off a stationary carriage
+    speedRef.current = 0;
+    targetSpeedRef.current = 0;
+    sourceRef.current = el;
+    startRectRef.current = el.getBoundingClientRect();
+    setFlip({ index, key, stage: "mini" });
+  };
+
+  const closeCard = () => {
+    setFlip((current) => {
+      if (!current || current.stage === "collapsing") return current;
+      if (current.stage === "mini") return null;
+      const el = sourceRef.current;
+      const box = flipRef.current;
+      if (el && box) placeFlipAt(box, el.getBoundingClientRect(), true);
+      return { ...current, stage: "collapsing" };
+    });
+  };
+
+  const handleFlipTransitionEnd = (event: React.TransitionEvent<HTMLDivElement>) => {
+    if (event.propertyName !== "transform") return;
+    setFlip((current) => {
+      if (!current) return current;
+      if (current.stage === "expanding") return { ...current, stage: "expanded" };
+      if (current.stage === "collapsing") {
+        setHoveredKey(null);
+        return null;
+      }
+      return current;
+    });
+  };
+
+  useEffect(() => {
+    if (!flip) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeCard();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [flip]);
+
+  const active = flip ? experiences[flip.index] : null;
+  const scrimVisible = !!flip && flip.stage !== "collapsing";
+
+  const renderCard = (item: (typeof experiences)[number], index: number, key: string, extra: { className?: string; style?: React.CSSProperties; decorative?: boolean }) => (
+    <button
+      type="button"
+      className={`journey-car ${extra.className ?? ""}${hoveredKey === key ? " is-hovered" : ""}${flip?.key === key ? " is-source-hidden" : ""}`}
+      style={extra.style}
+      key={key}
+      tabIndex={extra.decorative ? -1 : undefined}
+      onPointerEnter={(event) => { if (event.pointerType === "mouse") setHoveredKey(key); }}
+      onPointerMove={(event) => { if (event.pointerType === "mouse" && hoveredKey !== key) setHoveredKey(key); }}
+      onPointerLeave={(event) => { if (event.pointerType === "mouse") setHoveredKey((current) => (current === key ? null : current)); }}
+      onFocus={(event) => { if (event.currentTarget.matches(":focus-visible")) setHoveredKey(key); }}
+      onBlur={() => setHoveredKey((current) => (current === key ? null : current))}
+      onClick={(event) => openCard(index, key, event.currentTarget)}
+      aria-label={`Open details for ${item.company}`}
+    >
+      <span className="car-window" aria-hidden="true" />
+      <h2>{item.company}</h2>
+      <p className="journey-date">{item.date}</p>
+      <p className="journey-description">{item.description}</p>
+      <div className="journey-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+    </button>
+  );
+
+  const trainCopy = (copy: 0 | 1) => (
+    <div className={`train-copy train-copy--${copy === 0 ? "a" : "b"}`} aria-hidden={copy === 1 ? true : undefined} ref={copy === 0 ? spriteRef : undefined}>
+      <img className="train-sprite" src="/images/train-sprite.webp" alt="" draggable={false} />
+      {WHEELS.map(([cx, cy, r], wi) => (
+        <span
+          className="train-wheel"
+          key={`w${wi}`}
+          data-r={r}
+          aria-hidden="true"
+          style={{
+            left: `${((cx - WHEEL_TILE / 2) / TRAIN_SPRITE.w) * 100}%`,
+            top: `${((cy - WHEEL_TILE / 2) / TRAIN_SPRITE.h) * 100}%`,
+            width: `${(WHEEL_TILE / TRAIN_SPRITE.w) * 100}%`,
+            height: `${(WHEEL_TILE / TRAIN_SPRITE.h) * 100}%`,
+            backgroundPositionX: `${(wi / (WHEELS.length - 1)) * 100}%`,
+          }}
+        />
+      ))}
+      <img
+        className="train-rod"
+        src="/images/train-rod.webp"
+        alt=""
+        draggable={false}
+        style={{
+          left: `${(ROD_BOX[0] / TRAIN_SPRITE.w) * 100}%`,
+          top: `${(ROD_BOX[1] / TRAIN_SPRITE.h) * 100}%`,
+          width: `${(ROD_BOX[2] / TRAIN_SPRITE.w) * 100}%`,
+          height: `${(ROD_BOX[3] / TRAIN_SPRITE.h) * 100}%`,
+        }}
+      />
+      <span className="train-puff train-puff--1" aria-hidden="true" />
+      <span className="train-puff train-puff--2" aria-hidden="true" />
+      <span className="train-puff train-puff--3" aria-hidden="true" />
+      {experiences.map((item, index) => renderCard(item, index, `${copy}-${item.company}`, { className: "train-card", style: panelStyle(index), decorative: copy === 1 }))}
+    </div>
+  );
+
   return (
     <section className="page experience-page" aria-labelledby="experience-title">
+      <div className="train-stage" role="group" aria-label="Experience timeline">
+        <img className="train-stage-plate" src="/images/experience-plate.jpg" alt="" draggable={false} />
+        <div className="train-layer">
+          <div className="train-run" ref={runRef}>
+            {trainCopy(1)}
+            {trainCopy(0)}
+          </div>
+        </div>
+      </div>
       <p className="landscape-note journey-note">Not just internships,<br />but stepping stones<br />to a brighter me.</p>
       <HangingSign id="experience-title" title="My Journey" subtitle="Internships / Learnings / Milestones" className="journey-sign" />
-      <div className="journey-line" aria-label="Experience timeline">
-        {experiences.map((item, index) => (
-          <article className={`journey-car journey-car--${index + 1}`} key={item.company}>
-            <span className="car-window" aria-hidden="true" />
-            <h2>{item.company}</h2>
-            <p className="journey-date">{item.date}</p>
-            <p className="journey-description">{item.description}</p>
-            <div className="journey-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-          </article>
-        ))}
+      {/* Stacked list used on phones (the moving train is hidden there) */}
+      <div className="journey-line" aria-label="Experience list">
+        {experiences.map((item, index) => renderCard(item, index, `m-${item.company}`, { className: "journey-list-card" }))}
       </div>
       <a className="horizon-sign" href="#skills">Onwards to<br />bigger horizons <HeartIcon /></a>
+
+      {flip && (
+        <div className={`experience-scrim${scrimVisible ? " is-visible" : ""}`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCard(); }}>
+          <div
+            className="experience-flip"
+            ref={flipRef}
+            data-stage={flip.stage}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="experience-flip-title"
+            onTransitionEnd={handleFlipTransitionEnd}
+          >
+            <button className="dialog-close experience-flip-close" type="button" onClick={closeCard} aria-label="Close experience details">×</button>
+            <div className="flip-mini" aria-hidden={flip.stage !== "mini"}>
+              <span className="car-window" aria-hidden="true" />
+              <h2>{active!.company}</h2>
+              <p className="journey-date">{active!.date}</p>
+              <p className="journey-description">{active!.description}</p>
+              <div className="journey-tags">{active!.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+            </div>
+            <div className="flip-detail" aria-hidden={flip.stage === "mini"}>
+              <span className="dialog-icon"><ExperienceDetailIcon index={flip.index} /></span>
+              <p className="dialog-kicker">A stop along the way</p>
+              <h2 id="experience-flip-title">{active!.company}</h2>
+              <p className="dialog-subtitle">{active!.date}</p>
+              <p className="dialog-description">{active!.description}</p>
+              <div className="journey-tags experience-flip-tags">{active!.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+              <div className="dialog-actions"><button className="storybook-button storybook-button--gold" type="button" onClick={closeCard}>Back to the train</button><a href="#contact" className="dialog-contact" onClick={closeCard}>Ask me about it <ArrowIcon /></a></div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-type Skill = { title: string; icon: string; position: string; color: string; detail: string };
+type Skill = { title: string; apple: string; position: string; detail: string };
 
 const skills: Skill[] = [
-  { title: "Frontend & UI/UX", icon: "screen", position: "front", color: "coral", detail: "Thoughtful interfaces, responsive layouts, and the details that make a product feel alive." },
-  { title: "Backend Development", icon: "server", position: "backend", color: "green", detail: "Server-side logic, APIs, and the systems that keep a product moving." },
-  { title: "AI / ML", icon: "brain", position: "ai", color: "gold", detail: "Curious experiments with machine learning, language models, and useful automation." },
-  { title: "Tools & Technologies", icon: "wrench", position: "tools", color: "violet", detail: "A growing toolkit for building, testing, collaborating, and shipping." },
-  { title: "Programming Languages", icon: "code", position: "code", color: "coral", detail: "Python, JavaScript, and the everyday craft of writing clear code." },
-  { title: "Data & Databases", icon: "database", position: "data", color: "blue", detail: "Structuring information so it can be queried, understood, and put to work." },
-  { title: "Cloud & DevOps", icon: "cloud", position: "cloud", color: "rose", detail: "Deployment, CI/CD, and the work that helps software run reliably." },
+  { title: "Frontend & UI/UX", apple: "red", position: "front", detail: "Thoughtful interfaces, responsive layouts, and the details that make a product feel alive." },
+  { title: "Backend Development", apple: "green", position: "backend", detail: "Server-side logic, APIs, and the systems that keep a product moving." },
+  { title: "AI / ML", apple: "red-leaf", position: "ai", detail: "Curious experiments with machine learning, language models, and useful automation." },
+  { title: "Tools & Technologies", apple: "yellow", position: "tools", detail: "A growing toolkit for building, testing, collaborating, and shipping." },
+  { title: "Programming Languages", apple: "crimson", position: "code", detail: "Python, JavaScript, and the everyday craft of writing clear code." },
+  { title: "Data & Databases", apple: "orange", position: "data", detail: "Structuring information so it can be queried, understood, and put to work." },
+  { title: "Cloud & DevOps", apple: "blush", position: "cloud", detail: "Deployment, CI/CD, and the work that helps software run reliably." },
 ];
-
-function SkillIcon({ name }: { name: string }) {
-  const paths: Record<string, React.ReactNode> = {
-    screen: <><rect x="3" y="4" width="18" height="13" rx="1.6" /><path d="M8 21h8M12 17v4" /></>,
-    server: <><rect x="4" y="4" width="16" height="7" rx="1.5" /><rect x="4" y="14" width="16" height="6" rx="1.5" /><path d="M7 7.5h.1M7 17h.1M11 7.5h6M11 17h6" /></>,
-    brain: <><path d="M12 5a3 3 0 0 0-5.8 1.8A3.5 3.5 0 0 0 4 13.4 3.2 3.2 0 0 0 7 19h5ZM12 5a3 3 0 0 1 5.8 1.8 3.5 3.5 0 0 1 2.2 6.6 3.2 3.2 0 0 1-3 5.6h-5ZM12 5v14M7.5 10h2m5 0h2m-9 4h2m5 0h2" /></>,
-    wrench: <><path d="M14.4 6.1a5 5 0 0 0-6.7 6.7L3 17.5 6.5 21l4.7-4.7a5 5 0 0 0 6.7-6.7l-3 3-3-3Z" /></>,
-    code: <><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" /></>,
-    database: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></>,
-    cloud: <><path d="M7 18h10a4 4 0 0 0 .7-7.9A6 6 0 0 0 6.2 8.5 4.8 4.8 0 0 0 7 18Z" /></>,
-  };
-
-  return <svg className="skill-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
-}
 
 function SkillsPage() {
   const [selected, setSelected] = useState<Skill | null>(null);
+  const selectByTitle = useCallback((title: string | null) => {
+    setSelected(title ? skills.find((skill) => skill.title === title) ?? null : null);
+  }, []);
 
   return (
     <section className="page skills-page" aria-labelledby="skills-title">
+      <TreeStage skills={skills} selected={selected?.title ?? null} onSelect={selectByTitle} />
       <p className="landscape-note skills-note">Different skills.<br />Same curiosity.<br />Always growing.</p>
       <HangingSign id="skills-title" title="My Skills" subtitle="Different skills, same curiosity." className="skills-sign" />
+      {/* Small screens: the tree is a backdrop and the apples are listed instead. */}
       <div className="skill-garden" aria-label="Skill categories">
         {skills.map((skill) => (
           <button
-            className={`skill-fruit skill-fruit--${skill.position} skill-fruit--${skill.color}${selected?.title === skill.title ? " is-selected" : ""}`}
+            className={`skill-fruit skill-fruit--${skill.position}${selected?.title === skill.title ? " is-selected" : ""}`}
             key={skill.title}
             type="button"
             aria-pressed={selected?.title === skill.title}
             onClick={() => setSelected((current) => current?.title === skill.title ? null : skill)}
           >
-            <SkillIcon name={skill.icon} />
-            <span>{skill.title}</span>
+            <img className="skill-fruit__img" src={`/images/apples/apple-${skill.apple}.png`} alt="" draggable={false} />
+            <span className="skill-fruit__name">{skill.title}</span>
           </button>
         ))}
       </div>
